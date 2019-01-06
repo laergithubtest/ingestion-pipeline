@@ -1,0 +1,117 @@
+version: "3.6"
+services:
+  {{laernlp_service_name}}:
+     container_name: {{laernlp_service_name}} 
+     volumes:
+        - type: volume
+          source: laernlp-maven-cache
+          target: /root/.m2
+
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/{{laernlp_service_repo}}"
+        args:
+           - maven
+
+  {{mongo_service_name}}:
+     container_name: {{mongo_service_name}} 
+     image: laerinternal.com/mongo:0.1
+     volumes:
+        - {{case}}-mongo:/data/db
+
+  {{query_parser_service_name}}:
+     container_name: {{query_parser_service_name}}
+     depends_on:
+        - {{laernlp_service_name}} 
+        - {{mongo_service_name}} 
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/{{query_parser_service_repo}}"
+        args: 
+            - mongo_db_key
+            - gitusername
+            - gitpassword
+     volumes:
+        - type: volume
+          source: out-{{case}}
+          target: /corpus/{{case}}
+          read_only: true
+
+        - type: volume
+          source: embeddings
+          target: /data/embeddings
+          read_only: true
+     environment:
+        {{hosts_and_ports()|indent(8,True)}}
+
+     command: bash run.sh
+
+  {{semantic_parser_service_name}}:
+     container_name: {{semantic_parser_service_name}}
+     depends_on:
+        - {{query_parser_service_name}} 
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/{{semantic_parser_service_repo}}"
+        args: 
+            - gitusername
+            - gitpassword
+     volumes:
+        - type: volume
+          source: out-{{case}}
+          target: /corpus/{{case}}
+          read_only: true
+
+        - type: volume
+          source: embeddings
+          target: /data/embeddings
+          read_only: true
+
+        - type: volume
+          source: semantic-parser-maven-cache
+          target: /root/.m2
+
+     environment:
+        {{hosts_and_ports()|indent(8,True)}}
+        - WAIT_HOSTS={{query_parser_service_name}}:{{query_parser_port}}
+        - WAIT_HOSTS_TIMEOUT=100
+
+  {% if training %}
+     command: bash -c "mvn clean install && bash train.sh"  
+  {% endif %}
+
+  integration-tests:
+     container_name: integration-tests 
+     build:
+        context: ../integration-tests/java
+
+     volumes:
+        - ../integration-tests/java:/code
+
+     depends_on:
+        - {{semantic_parser_service_name}}
+
+     environment:
+        {{hosts_and_ports()|indent(8,True)}}
+        - WAIT_HOSTS={{semantic_parser_service_name}}:{{semantic_parser_port}}
+        - WAIT_HOSTS_TIMEOUT=100
+
+volumes:
+
+  out-{{case}}:
+    name: out-{{case}}
+    external: true
+
+  {{case}}-mongo:
+    name: {{case}}-mongo
+    external: true
+
+  embeddings:
+    name: embeddings 
+    external: true
+
+  laernlp-maven-cache:
+    name: laernlp-maven-cache
+    #external: true
+
+  semantic-parser-maven-cache:
+    name: semantic-parser-maven-cache
+    #external: true
+    

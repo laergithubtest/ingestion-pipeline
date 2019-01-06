@@ -1,0 +1,158 @@
+
+version: "3.6"
+services:
+  laernlp:
+     container_name: laernlp 
+     volumes:
+        - type: volume
+          source: laernlp-maven-cache
+          target: /root/.m2
+
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/laergithubtest/LaerNLP.git#v2018.12.21.0"
+        args:
+           - maven
+
+  mongo:
+     container_name: mongo 
+     image: laerinternal.com/mongo:0.1
+     volumes:
+        - enron-mongo:/data/db
+
+  query-parser:
+     container_name: query-parser
+     depends_on:
+        - laernlp 
+        - mongo 
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/laergithubtest/query-parser.git"
+        args: 
+            - mongo_db_key
+            - gitusername
+            - gitpassword
+     volumes:
+        - type: volume
+          source: out-enron
+          target: /corpus/enron
+          read_only: true
+
+        - type: volume
+          source: embeddings
+          target: /data/embeddings
+          read_only: true
+     environment:
+                
+        - LAERNLP_URI=http://laernlp:9000
+        - MONGODB_IP=mongo
+        - MONGODB_PORT=27017
+        - SOLR_IP=solr
+        - SOLR_PORT=8983
+        - CORENLP_PARSER=http://query-parser
+        - CORENLP_PARSER_PORT=1200
+        - QUERY_PARSER=http://query-parser
+        - QUERY_PARSER_PORT=1200
+        - SEMANTIC_PARSER=http://semantic-parser
+        - SEMANTIC_PARSER_PORT=1200
+        - QUERY_EXECUTOR=http://query-executor
+        - QUERY_EXECUTOR_PORT=1200
+
+
+     command: bash run.sh
+
+  semantic-parser:
+     container_name: semantic-parser
+     depends_on:
+        - query-parser 
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/laergithubtest/semantic-parser.git"
+        args: 
+            - gitusername
+            - gitpassword
+     volumes:
+        - type: volume
+          source: out-enron
+          target: /corpus/enron
+          read_only: true
+
+        - type: volume
+          source: embeddings
+          target: /data/embeddings
+          read_only: true
+
+        - type: volume
+          source: semantic-parser-maven-cache
+          target: /root/.m2
+
+     environment:
+                
+        - LAERNLP_URI=http://laernlp:9000
+        - MONGODB_IP=mongo
+        - MONGODB_PORT=27017
+        - SOLR_IP=solr
+        - SOLR_PORT=8983
+        - CORENLP_PARSER=http://query-parser
+        - CORENLP_PARSER_PORT=1200
+        - QUERY_PARSER=http://query-parser
+        - QUERY_PARSER_PORT=1200
+        - SEMANTIC_PARSER=http://semantic-parser
+        - SEMANTIC_PARSER_PORT=1200
+        - QUERY_EXECUTOR=http://query-executor
+        - QUERY_EXECUTOR_PORT=1200
+
+        - WAIT_HOSTS=query-parser:1200
+        - WAIT_HOSTS_TIMEOUT=100
+
+  
+
+  integration-tests:
+     container_name: integration-tests 
+     build:
+        context: ../integration-tests
+
+     volumes:
+        - ../integration-tests:/code
+
+     depends_on:
+        - semantic-parser
+
+     environment:
+                
+        - LAERNLP_URI=http://laernlp:9000
+        - MONGODB_IP=mongo
+        - MONGODB_PORT=27017
+        - SOLR_IP=solr
+        - SOLR_PORT=8983
+        - CORENLP_PARSER=http://query-parser
+        - CORENLP_PARSER_PORT=1200
+        - QUERY_PARSER=http://query-parser
+        - QUERY_PARSER_PORT=1200
+        - SEMANTIC_PARSER=http://semantic-parser
+        - SEMANTIC_PARSER_PORT=1200
+        - QUERY_EXECUTOR=http://query-executor
+        - QUERY_EXECUTOR_PORT=1200
+
+        - WAIT_HOSTS=semantic-parser:1200
+        - WAIT_HOSTS_TIMEOUT=100
+
+volumes:
+
+  out-enron:
+    name: out-enron
+    external: true
+
+  enron-mongo:
+    name: enron-mongo
+    external: true
+
+  embeddings:
+    name: embeddings 
+    external: true
+
+  laernlp-maven-cache:
+    name: laernlp-maven-cache
+    #external: true
+
+  semantic-parser-maven-cache:
+    name: semantic-parser-maven-cache
+    #external: true
+    

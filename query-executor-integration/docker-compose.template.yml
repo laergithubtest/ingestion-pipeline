@@ -1,0 +1,144 @@
+version: "3.6"
+services:
+  {{laernlp_service_name}}:
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/{{laernlp_service_repo}}"
+        args:
+           - maven
+     volumes:
+        - type: volume
+          source: laernlp-maven-cache
+          target: /root/.m2
+
+  {{mongo_service_name}}:
+     container_name: {{mongo_service_name}}
+     image: laerinternal.com/mongo:0.1
+     volumes:
+        - mongo-data:/data/db
+     ports:
+         - "1236:{{mongo_port}}"
+
+  {{solr_service_name}}:
+     container_name: {{solr_service_name}}
+     image: solr 
+     volumes:
+         - type: volume
+           source: solr-data
+           target: /opt/solr/server/solr
+
+  {{query_parser_service_name}}:
+     container_name: {{query_parser_service_name}}
+     depends_on:
+        - {{laernlp_service_name}}
+        - {{mongo_service_name}}
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/{{query_parser_service_repo}}"
+        args:
+            - mongo_db_key
+            - gitusername
+            - gitpassword
+     volumes:
+        - type: volume
+          source: out-{{case}}
+          target: /out-{{case}}
+          read_only: true
+
+        - type: volume
+          source: knowledge
+          target: /knowledge
+          read_only: true
+     ports:
+         - "1232:{{query_parser_port}}"
+     environment:
+        {{hosts_and_ports()|indent(8,True)}}
+        - EMBEDDING_PATH=/knowledge
+        - WAIT_HOSTS={{laernlp_service_name}}:{{laernlp_port}},{{mongo_service_name}}:{{mongo_port}}
+        - WAIT_HOSTS_TIMEOUT=300
+     command: sh -c "/wait && cd /root/query-parser && python server.py --case_path /out-{{case}}"
+
+  {{semantic_parser_service_name}}:
+     container_name: {{semantic_parser_service_name}}
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/{{semantic_parser_service_repo}}"
+        args:
+            - maven
+     volumes:
+        - type: volume
+          source: semantic-parser-maven-cache
+          target: /root/.m2
+     ports:
+         - "1234:{{semantic_parser_port}}"
+     environment:
+        {{hosts_and_ports()|indent(8,True)}}
+        - WAIT_HOSTS={{query_parser_service_name}}:{{query_parser_port}}
+        - WAIT_HOSTS_TIMEOUT=300
+     command: sh -c "/wait && python3 run.py server"
+
+  {{query_executor_service_name}}:
+     container_name: {{query_executor_service_name}}
+     depends_on:
+        - {{mongo_service_name}}
+        - {{solr_service_name}}
+        - {{query_parser_service_name}}
+        - {{semantic_parser_service_name}}
+     volumes:
+        - type: volume
+          source: query-executor-maven-cache
+          target: /root/.m2
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/{{query_executor_service_repo}}"
+        args:
+            - maven
+     ports:
+         - "1235:{{query_executor_port}}"
+     environment:
+        {{hosts_and_ports()|indent(8,True)}}
+        - WAIT_HOSTS={{mongo_service_name}}:{{mongo_port}},{{solr_service_name}}:{{solr_port}},{{query_parser_service_name}}:{{query_parser_port}},{{semantic_parser_service_name}}:{{semantic_parser_port}}
+        - WAIT_HOSTS_TIMEOUT=300
+     command: sh -c "/wait && cd /root/query-executor && ./run.sh"
+
+  integration-tests:
+     container_name: integration-tests
+     build:
+        context: ../integration-tests/python
+        args:
+            - gitusername
+            - gitpassword
+     depends_on:
+        - {{query_parser_service_name}}
+        - {{semantic_parser_service_name}}
+        - {{query_executor_service_name}}
+
+     environment:
+        {{hosts_and_ports()|indent(8,True)}}
+        - WAIT_HOSTS={{semantic_parser_service_name}}:{{semantic_parser_port}},{{query_parser_service_name}}:{{query_parser_port}},{{query_executor_service_name}}:{{query_executor_port}}
+        - WAIT_HOSTS_TIMEOUT=300
+     command: sh -c "/wait && cd /root/aida-client && python test.py --case_id {{case}}"
+
+volumes:
+
+  out-{{case}}:
+    name: out-{{case}}
+#    external: true
+
+  mongo-data:
+    name: mongo-data
+#    external: true
+
+  knowledge:
+    name: knowledge
+#    external: true
+
+  solr-data:
+    name: solr-data
+#    external: true
+
+  laernlp-maven-cache:
+    name: laernlp-maven-cache
+#    external: true
+
+  semantic-parser-maven-cache:
+    name: semantic-parser-maven-cache
+
+  query-executor-maven-cache:
+    name: query-executor-maven-cache

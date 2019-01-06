@@ -1,0 +1,134 @@
+version: "3.6"
+services:
+  knowledge-volume-mounter:
+     image: laerinternal.com/knowledge
+     volumes: 
+         - type: volume
+           source: knowledge
+           target: /knowledge
+           read_only: true
+
+  input-volume-mounter:
+     image: laerinternal.com/{{case}}-sample
+     #image: {{case}}
+     volumes:
+         - type: volume
+           source: {{case}}
+           target: /{{case}}
+           read_only: true
+
+  config-volume-mounter:
+     image: laerinternal.com/{{case}}-config:0.1
+     volumes:
+         - type: volume
+           source: {{case}}-config
+           target: /config
+           read_only: true
+
+  {{laernlp_service_name}}:
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/{{laernlp_service_repo}}"
+        args:
+           - maven
+     volumes:
+        - type: volume
+          source: laernlp-maven-cache
+          target: /root/.m2
+
+  {{mongo_service_name}}:
+     container_name: {{mongo_service_name}}
+     image: laerinternal.com/mongo:0.1
+     volumes:
+        - mongo-data:/data/db
+
+  {{solr_service_name}}:
+     container_name: {{solr_service_name}}
+     image: solr
+     volumes:
+         - type: volume
+           source: solr-data
+           target: /opt/solr/server/solr
+     
+  aida-pipeline:
+     container_name: aida-pipeline
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/{{aida_pipeline_repo}}"
+        args:
+            - gitusername
+            - gitpassword
+            - maven
+            - mongo_db_key
+            - google_api_key
+            - google_knowledge_key
+            - bing_search_key
+            - pipl_key
+            - clearbit_key
+     depends_on: 
+         - knowledge-volume-mounter
+         - input-volume-mounter
+         - config-volume-mounter
+         - {{laernlp_service_name}}
+         - {{mongo_service_name}}
+         - {{solr_service_name}}
+     volumes: 
+         - type: volume
+           source: knowledge
+           target: /knowledge
+           read_only: false 
+
+         - type: volume
+           source: {{case}}
+           target: /{{case}}
+           read_only: false
+
+         - type: volume
+           source: {{case}}-config
+           target: /config
+           read_only: true
+
+         - type: volume
+           source: out-{{case}}
+           target: /out-{{case}}
+           read_only: false 
+     environment:
+        {{hosts_and_ports()|indent(8,True)}}
+        - COMMON_KB_FOLDER=/knowledge
+        - WAIT_HOSTS={{laernlp_service_name}}:{{laernlp_port}},{{mongo_service_name}}:{{mongo_port}},{{solr_service_name}}:{{solr_port}}
+        - WAIT_HOSTS_TIMEOUT=100
+
+     command: sh -c "/wait
+              && cd /root/aida-raw-data-loader && python run.py --config /config/config-{{case}}.json --custodians /config/custodians-{{case}}.json
+              && cd /root/aida-kb && python run.py --case_path /out-{{case}}
+              && cd /root/aida-pdf-ocr && python run.py --case_path /out-{{case}}
+              && cd /root/aida-document-parsing && python run.py --case_path /out-{{case}}
+              && cd /root/aida-mongo && python run.py --case_path /out-{{case}}
+              && cd /root/search-indexer && ./build.sh {{case}}"
+
+volumes:
+  knowledge: 
+    name: knowledge
+    external: false 
+
+  {{case}}-config:
+    name: {{case}}-config
+    external: false
+
+  {{case}}:
+    name: {{case}}
+    external: false 
+
+  out-{{case}}:
+    name: out-{{case}}
+    external: false 
+
+  mongo-data:
+    name: mongo-data
+    external: false 
+
+  solr-data:
+    name: solr-data
+    external: false
+
+  laernlp-maven-cache:
+    name: laernlp-maven-cache
+    external: false

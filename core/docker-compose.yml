@@ -1,0 +1,149 @@
+
+version: "3.6"
+services:
+  knowledge-volume-mounter:
+     image: laerinternal.com/knowledge
+     volumes: 
+         - type: volume
+           source: knowledge
+           target: /knowledge
+           read_only: true
+
+  input-volume-mounter:
+     image: laerinternal.com/enron-sample
+     #image: enron
+     volumes:
+         - type: volume
+           source: enron
+           target: /enron
+           read_only: true
+
+  config-volume-mounter:
+     image: laerinternal.com/enron-config:0.1
+     volumes:
+         - type: volume
+           source: enron-config
+           target: /config
+           read_only: true
+
+  laernlp:
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/laergithubtest/LaerNLP.git#v2018.12.21.0"
+        args:
+           - maven
+     volumes:
+        - type: volume
+          source: laernlp-maven-cache
+          target: /root/.m2
+
+  mongo:
+     container_name: mongo
+     image: laerinternal.com/mongo:0.1
+     volumes:
+        - mongo-data:/data/db
+
+  solr:
+     container_name: solr
+     image: solr
+     volumes:
+         - type: volume
+           source: solr-data
+           target: /opt/solr/server/solr
+     
+  aida-pipeline:
+     container_name: aida-pipeline
+     build:
+        context: "https://$gitusername:$gitpassword@github.com/laergithubtest/aida-pipeline.git"
+        args:
+            - gitusername
+            - gitpassword
+            - maven
+            - mongo_db_key
+            - google_api_key
+            - google_knowledge_key
+            - bing_search_key
+            - pipl_key
+            - clearbit_key
+     depends_on: 
+         - knowledge-volume-mounter
+         - input-volume-mounter
+         - config-volume-mounter
+         - laernlp
+         - mongo
+         - solr
+     volumes: 
+         - type: volume
+           source: knowledge
+           target: /knowledge
+           read_only: false 
+
+         - type: volume
+           source: enron
+           target: /enron
+           read_only: false
+
+         - type: volume
+           source: enron-config
+           target: /config
+           read_only: true
+
+         - type: volume
+           source: out-enron
+           target: /out/enron
+           read_only: false 
+     environment:
+                
+        - LAERNLP_URI=http://laernlp:9000
+        - MONGODB_IP=mongo
+        - MONGODB_PORT=27017
+        - SOLR_IP=solr
+        - SOLR_PORT=8983
+        - CORENLP_PARSER=http://query-parser
+        - CORENLP_PARSER_PORT=1200
+        - QUERY_PARSER=http://query-parser
+        - QUERY_PARSER_PORT=1200
+        - SEMANTIC_PARSER=http://semantic-parser
+        - SEMANTIC_PARSER_PORT=1200
+        - QUERY_EXECUTOR=http://query-executor
+        - QUERY_EXECUTOR_PORT=1200
+
+        - COMMON_KB_FOLDER=/knowledge
+        - WAIT_HOSTS=laernlp:9000,mongo:27017,solr:8983
+        - WAIT_HOSTS_TIMEOUT=100
+
+     command: sh -c "/wait
+              && cd /root/aida-raw-data-loader && python run.py --config /config/config-enron.json --custodians /config/custodians-enron.json
+              && cd /root/aida-kb && python run.py --case_path /out-enron
+              && cd /root/aida-pdf-ocr && python run.py --case_path /out-enron
+              && cd /root/aida-document-parsing && python run.py --case_path /out-enron
+              && cd /root/aida-mongo && python run.py --case_path /out-enron
+              && cd /root/search-indexer && ./build.sh enron"
+
+volumes:
+  knowledge: 
+    name: knowledge
+    external: false 
+
+  enron-config:
+    name: enron-config
+    external: false
+
+  enron:
+    name: enron
+    external: false 
+
+  out-enron:
+    name: out-enron
+    external: false 
+
+  mongo-data:
+    name: mongo-data
+    external: false 
+
+  solr-data:
+    name: solr-data
+    external: false
+
+  laernlp-maven-cache:
+    name: laernlp-maven-cache
+    external: false
